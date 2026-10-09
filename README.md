@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 운세모아
 
-## Getting Started
+사주·타로·궁합·오늘의 운세를 한 곳에 모은 운세 사이트. Next.js 16 (App Router) + TypeScript + Tailwind v4.
 
-First, run the development server:
+## 실행
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev     # http://localhost:3000
+npm test        # 계산 로직 검증 (node 내장 러너, 프레임워크 없음)
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 구조
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+src/lib/          순수 TS — React/Next 의존 없음 (나중에 앱에서 그대로 재사용 가능)
+  saju.ts         만세력 엔진: 천간지지, 절기, 오행, 십신
+  sajuText.ts     사주 해석 문구 (계산과 분리)
+  fortune.ts      오늘의 운세 — 날짜 시드 기반 결정적 생성
+  gunghap.ts      궁합 — 지지 관계(삼합/육합/충/해/파) + 일간 오행
+  tarot.ts        메이저 아르카나 22장
+  guide.ts        용어 사전 본문
+  josa.ts         한국어 조사 자동 선택
+  site.ts         사이트명 · URL · 네비게이션
+src/components/   Header, Footer, AdSlot, ShareButtons, 운세/띠 공용 컴포넌트
+src/app/          라우트 — (content)/ 그룹은 넓은 화면에서 오른쪽 곁칸(SideBar)이 붙는 운세 페이지들
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 만세력 계산
 
-## Learn More
+절기를 날짜 테이블 대신 **태양황경으로 직접 계산**한다. 테이블 방식은 담아둔 연도 범위를 벗어나면 틀리지만, 이 방식은 1900~2100 전 구간에서 오차 약 15분 안에 들어온다.
 
-To learn more about Next.js, take a look at the following resources:
+- **일주**: `(JDN_정오 − 11) mod 60`, 0 = 갑자. 2019-01-27 갑자일, 1781-03-13 임술일로 교차검증
+- **연주**: 입춘(황경 315°) 기준. 1~2월생은 전년도 간지가 적용된다
+- **월주**: 12절(節) 경계, 오호둔으로 월간 산출
+- **시주**: 자정에 일주가 바뀌는 방식(야자시 미적용), 오서둔으로 시간 산출
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`saju.ts`의 `LONGITUDE_CORRECTION_MIN`은 진태양시 보정값이다. 한국 표준시는 동경 135°인데 서울은 약 127°라 유파에 따라 −30분을 적용한다. 기본값은 0(미적용). 켜면 `BirthFields.tsx`의 시진 라벨도 30분씩 밀어야 한다.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 배포
 
-## Deploy on Vercel
+Vercel에 그대로 올라간다. 별도 설정 파일은 필요 없다.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+환경변수는 `.env.example` 참고:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| 변수 | 설명 |
+| --- | --- |
+| `NEXT_PUBLIC_SITE_URL` | 배포 도메인. sitemap·robots·OG·canonical이 전부 이 값을 따라간다 |
+| `NEXT_PUBLIC_ADSENSE_CLIENT` | 애드센스 퍼블리셔 ID. **비워두면 광고 스크립트와 슬롯이 아예 렌더되지 않는다** |
+| `NEXT_PUBLIC_ADSENSE_SLOT_TOP` / `_MID` / `_BOTTOM` | 광고 슬롯 ID |
+| `NEXT_PUBLIC_ADSENSE_SLOT_SIDE` | 넓은 화면 곁칸의 세로 광고 슬롯 ID (스크롤을 따라옴) |
+
+애드센스는 심사 통과 전까지 비워두는 편이 안전하다. 빈 광고 요청이 계정에 불리하게 작용할 수 있다.
+
+`NEXT_PUBLIC_ADSENSE_CLIENT`를 넣으면 `/ads.txt`도 같은 값으로 자동 생성된다(비어 있으면 404). 심사에 필요한 개인정보처리방침(광고 쿠키 고지 포함)은 `/privacy`, 푸터에 링크돼 있다.
+
+## 캐싱
+
+오늘의 운세 관련 페이지는 `revalidate = 3600`. KST 자정이 지난 뒤 첫 요청에서 새 날짜로 갱신된다. `/saju`·`/gunghap`·`/tarot`은 입력값(타로는 뽑은 카드 `?cards=10-1r-3`)을 쿼리스트링으로 받아 요청 시 렌더된다. 결과가 주소에 남아 그대로 공유되고, 공유 미리보기 제목도 결과를 따라간다(궁합은 `/gunghap/og` 전용 이미지까지).
+
+## 콘텐츠 반복 주기
+
+운세 문장은 "흐름 + 조언" 두 조각을 서로소 크기의 풀에서 뽑아 조합한다. 단일 풀에서 한 문장씩 뽑으면 풀 크기(12일)마다 통째로 반복돼 매일 오는 사용자에게 2주면 들킨다. 현재 구조는 총운 기준 143일, 5개 분야 조합 기준으로는 1년 안에 같은 조합이 나오지 않는다. `fortune.test.ts`가 이 주기를 회귀 테스트로 고정한다.
+
+문장 풀을 늘릴 때는 **각 풀의 크기를 서로소로 유지**해야 한다. 크기가 서로 배수 관계가 되면 주기가 급격히 짧아진다.
+
+별점은 따로 뽑지 않고 총운 흐름 문장의 기운(`FLOW`의 1 / 0 / -1)에서 정한다 — 좋음 4~5점, 보통 3점, 조심 1~2점. 같은 구간 안의 한 칸 차이만 정수 해시로 흔든다. 흐름 문장을 추가할 때는 기운 값도 함께 적을 것. 오늘의 행운 동물(`luckyOf`)은 최고점 띠 중 하나를 날짜로 고른다.
+
+## 참고
+
+모든 운세 콘텐츠는 전통 명리학·점성술 해석에 따른 참고용 정보다.
